@@ -7,19 +7,21 @@ import Loader from "./Loader";
 function AppLayout() {
   // Hook from react-router allowed us to get information about status of routes, like loading, submitting etc.
   const navigation = useNavigation();
-  console.log(navigation);
+
   // Making variable isLoading for rendering loading spinner
   const isLoading = navigation.state === "loading";
 
   return (
-    <div className="layout">
+    <div className="grid h-screen grid-rows-[auto_1fr_auto]">
       {isLoading && <Loader />}
-      <Header />
 
-      <main>
-        {/* Outlet renders current nested route */}
-        <Outlet />
-      </main>
+      <Header />
+      <div className="overflow-scroll">
+        <main className="mx-auto max-w-3xl">
+          {/* Outlet renders current nested route */}
+          <Outlet />
+        </main>
+      </div>
 
       <CartOverview />
     </div>
