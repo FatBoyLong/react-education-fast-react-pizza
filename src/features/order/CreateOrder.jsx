@@ -1,9 +1,18 @@
-import { useSelector } from "react-redux";
+import { useState } from "react";
+import { useSelector, useDispatch } from "react-redux";
 import { Form, redirect, useActionData, useNavigation } from "react-router-dom";
+
+import { clearCart, getCart, getTotalCartPrice } from "../cart/cartSlice";
 
 import { createOrder } from "../../services/apiRestaurant";
 
 import Button from "../../ui/Button";
+import EmptyCart from "../cart/EmptyCart";
+
+// importing store for dispatching action in action function
+import store from "../../store";
+import { formatCurrency } from "../../utils/helpers";
+import { fetchAddress } from "../user/userSlice";
 
 // https://uibakery.io/regex-library/phone-number
 const isValidPhone = (str) =>
@@ -11,42 +20,30 @@ const isValidPhone = (str) =>
     str,
   );
 
-const fakeCart = [
-  {
-    pizzaId: 12,
-    name: "Mediterranean",
-    quantity: 2,
-    unitPrice: 16,
-    totalPrice: 32,
-  },
-  {
-    pizzaId: 6,
-    name: "Vegetale",
-    quantity: 1,
-    unitPrice: 13,
-    totalPrice: 13,
-  },
-  {
-    pizzaId: 11,
-    name: "Spinach and Mushroom",
-    quantity: 1,
-    unitPrice: 15,
-    totalPrice: 15,
-  },
-];
-
 function CreateOrder() {
-  const username = useSelector((state) => state.user.username);
+  const dispatch = useDispatch();
+  const [withPriority, setWithPriority] = useState(false);
+  const {
+    username,
+    status: addressStatus,
+    position,
+    address,
+    error: errorAddress,
+  } = useSelector((state) => state.user);
+
+  const isLoadingAddress = addressStatus === "loading";
 
   // Using hook for getting status data
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
-
   // Custom hook for getting data from action
   const formErrors = useActionData();
+  const cart = useSelector(getCart);
+  const totalCartPrice = useSelector(getTotalCartPrice);
+  const priorityPrice = withPriority ? totalCartPrice * 0.2 : 0;
+  const totalPrice = totalCartPrice + priorityPrice;
 
-  // const [withPriority, setWithPriority] = useState(false);
-  const cart = fakeCart;
+  if (!cart.length) return <EmptyCart />;
 
   return (
     <div className="px-4 py-6">
@@ -80,17 +77,39 @@ function CreateOrder() {
           </div>
         </div>
 
-        <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="relative mb-5 flex flex-col gap-2 sm:flex-row sm:items-center">
           <label className="sm:basis-40">Address</label>
           <div className="grow">
             {/* Added w-full class cos input is not in flex container */}
             <input
               type="text"
               name="address"
+              defaultValue={address}
+              disabled={isLoadingAddress}
               required
               className="input w-full"
             />
+            {addressStatus === "error" && (
+              <p className="mt-2 w-4/5 rounded-full bg-red-100 p-2 text-xs text-red-700">
+                {errorAddress}
+              </p>
+            )}
           </div>
+          {!position.latitude && !position.longitude && (
+            <span className="absolute bottom-[3px] right-[3px] z-50 md:right-[5px] md:top-[5px]">
+              {/* Разобраться позже как работает dispatch(fetchAddress()) */}
+              <Button
+                type="small"
+                disabled={isLoadingAddress}
+                onClick={(e) => {
+                  e.preventDefault();
+                  dispatch(fetchAddress());
+                }}
+              >
+                Get position
+              </Button>
+            </span>
+          )}
         </div>
 
         <div className="mb-12 flex items-center gap-5">
@@ -98,8 +117,8 @@ function CreateOrder() {
             type="checkbox"
             name="priority"
             id="priority"
-            // value={withPriority}
-            // onChange={(e) => setWithPriority(e.target.checked)}
+            value={withPriority}
+            onChange={(e) => setWithPriority(e.target.checked)}
             className="h-6 w-6 accent-yellow-400 focus:outline-none focus:ring focus:ring-yellow-400 focus:ring-offset-2"
           />
           <label htmlFor="priority" className="font-medium">
@@ -110,10 +129,20 @@ function CreateOrder() {
         <div>
           {/* hidden input for getting cart data in action */}
           <input type="hidden" name="cart" value={JSON.stringify(cart)} />
-
+          <input
+            type="hidden"
+            name="position"
+            value={
+              position.longitude && position.latitude
+                ? `${position.latitude}, ${position.longitude}`
+                : ""
+            }
+          />
           {/* Better way to reuse styles in tailwind is to create separate components in ui */}
-          <Button disabled={isSubmitting} type="primary">
-            {isSubmitting ? "Placing order..." : "Order now"}
+          <Button disabled={isSubmitting || isLoadingAddress} type="primary">
+            {isSubmitting
+              ? "Placing order..."
+              : `Order now for ${formatCurrency(totalPrice)}`}
           </Button>
         </div>
       </Form>
@@ -124,12 +153,13 @@ function CreateOrder() {
 export async function action({ request }) {
   const formData = await request.formData();
   const data = Object.fromEntries(formData);
+  console.log(data);
 
   // Redacting data object little bit
   const order = {
     ...data,
     cart: JSON.parse(data.cart),
-    priority: data.priority === "on",
+    priority: data.priority === "true",
   };
 
   // Part with errors, watch later again
@@ -142,6 +172,9 @@ export async function action({ request }) {
 
   // If everything is ok create new order and redirect
   const newOrder = await createOrder(order);
+
+  // Feature for clearing cart after creating order. Do not overuse.
+  store.dispatch(clearCart());
 
   // Using redirect function from react router for redirect user to new page with current order
   return redirect(`/order/${newOrder.id}`);
